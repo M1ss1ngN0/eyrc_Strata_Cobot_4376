@@ -9,6 +9,195 @@ This repository is my working archive for the **e-Yantra Robotics Competition 20
 
 ---
 
+
+## Task 1B — UR7e Cartesian Waypoints
+
+### Result
+
+**Task 1B completed: 40/40.**
+
+- **AWR: 35/35** — all 5 waypoints reached in the required order.
+- **Bonus B: 5/5** — every waypoint was reached within **0.03 m**.
+- Each waypoint was held for the required **2 seconds**.
+- The final run completed without a protective stop.
+
+### Objective
+
+Task 1B requires the UR7e TCP to move through five Cartesian waypoints expressed in `base_link`, in the specified order, and hold at each waypoint for at least two seconds.
+
+The required waypoints are:
+
+```text
+1. (-0.4085, -0.5379, 0.1967)
+2. (-0.8000, -0.0005, 0.3967)
+3. (-0.7430,  0.5280, 0.1967)
+4. (-0.4097,  0.5280, 0.1967)
+5. (-0.0763,  0.5280, 0.1967)
+```
+
+The final implementation uses:
+
+- `/joint_states` for joint feedback
+- `/tcp_pose_raw` for Cartesian TCP feedback
+- `/delta_joint_cmds` for initial joint-space unfolding
+- `/delta_twist_cmds` for Cartesian waypoint motion
+- `/ur_arm_controller/switch_controller` to switch between joint and Cartesian servoing
+
+### Motion Strategy
+
+The default UR7e starting configuration is relatively folded, with the elbow close to its lower joint limit. Sending Cartesian commands immediately from this configuration caused the controller to approach a singular configuration during development.
+
+The final solution therefore uses a two-phase motion strategy:
+
+```text
+Default folded pose
+        │
+        ▼
+Joint-space unfolding
+        │
+        ▼
+Open / safer joint configuration
+        │
+        ▼
+Switch to Cartesian twist control
+        │
+        ▼
+WP1 → hold 2 s
+        │
+        ▼
+WP2 → hold 2 s
+        │
+        ▼
+WP3 → hold 2 s
+        │
+        ▼
+WP4 → hold 2 s
+        │
+        ▼
+WP5 → hold 2 s
+        │
+        ▼
+Complete
+```
+
+The unfolding target is:
+
+```text
+shoulder_pan_joint   =  0.00 rad
+shoulder_lift_joint  = -1.20 rad
+elbow_joint          = -1.60 rad
+wrist_1_joint        = -1.90 rad
+wrist_2_joint        =  1.57 rad
+wrist_3_joint        =  1.57 rad
+```
+
+Joint velocities are limited during this phase before switching to the Cartesian controller.
+
+### Cartesian Control
+
+The final controller uses **position-only Cartesian velocity commands**.
+
+For the current TCP position `P` and waypoint `P_target`:
+
+```text
+error = P_target - P
+```
+
+The error is converted directly into a Cartesian linear velocity and capped at:
+
+```text
+0.025 m/s
+```
+
+No angular velocity is commanded:
+
+```text
+angular.x = 0
+angular.y = 0
+angular.z = 0
+```
+
+This is intentional because Task 1B evaluates the TCP position rather than requiring a specific TCP orientation. Avoiding unnecessary orientation constraints also helped prevent the Cartesian controller from driving the elbow toward a singular configuration.
+
+### Waypoint Detection and Hold
+
+A waypoint is considered reached when the Euclidean Cartesian distance is:
+
+```text
+distance <= 0.030 m
+```
+
+At that point the node:
+
+1. Publishes zero Cartesian velocity.
+2. Records the hold start time.
+3. Maintains zero velocity for **2 seconds**.
+4. Advances to the next waypoint.
+
+The 3 cm threshold also satisfies the Task 1B bonus requirement, which was achieved for all five waypoints in the final evaluator run.
+
+### Important Debugging Lessons
+
+The main failure during development was a UR7e singularity caused by the Cartesian controller driving the elbow close to zero while approaching the first waypoint.
+
+A second issue was an intermediate high-Z approach path. The controller could reach the waypoint's position but the staged path logic could become stuck when the current TCP height was already above the artificial approach height.
+
+The final solution removed that unnecessary intermediate path and instead performs:
+
+```text
+unfold → direct Cartesian waypoint → hold → next waypoint
+```
+
+This produced the successful **40/40** evaluator result.
+
+### Final Task 1B File
+
+```text
+task1B.py
+```
+
+The cleaned submission version follows the Strata Cobot coding standards while preserving the motion logic used by the successful evaluator run.
+
+### Running Task 1B
+
+Launch the simulation:
+
+```bash
+ros2 launch eyantra_kepler_colony task1b.launch.py
+```
+
+Build and source the workspace:
+
+```bash
+cd ~/ros2_ws
+colcon build --packages-select algorithms
+source install/setup.bash
+```
+
+Run the node:
+
+```bash
+ros2 run algorithms task1B.py
+```
+
+For the evaluator:
+
+```bash
+cd ~/ros2_ws/src
+./eyrc-sc-evaluator --task 1B --team-id 4376
+```
+
+Wait for:
+
+```text
+Ready
+Start your node now.
+```
+
+Then start the solution node.
+
+The evaluator generates a signed `result.zip`. It must be preserved exactly as produced.
+
 ## Task 1A — Ore Perception
 
 ### Result
